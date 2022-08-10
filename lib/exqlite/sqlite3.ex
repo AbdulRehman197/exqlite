@@ -237,16 +237,16 @@ defmodule Exqlite.Sqlite3 do
   @spec backup_remaining(exqlite3_backup_ref()) :: backup_int_type() | {:error, reason()}
   def backup_remaining(backup) do
     case Sqlite3NIF.backup_remaining(backup) do
-      count ->  count
       {:error, reason} -> IO.inspect(reason)
+      count ->  count
     end
   end
 
   @spec backup_pagecount(exqlite3_backup_ref()) :: backup_int_type() | {:error, reason()}
   def backup_pagecount(backup) do
     case Sqlite3NIF.backup_pagecount(backup) do
-      count ->  count
       {:error, reason} -> IO.inspect(reason)
+      count ->  count
     end
   end
 
