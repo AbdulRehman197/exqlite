@@ -8,6 +8,8 @@ defmodule Exqlite.Sqlite3NIF do
   @on_load {:load_nif, 0}
 
   @type db() :: reference()
+  @type exqlite3_backup_ref() :: reference()
+  @type backup_int_type() :: integer()
   @type statement() :: reference()
   @type reason() :: :atom | String.Chars.t()
   @type row() :: list()
@@ -64,5 +66,20 @@ defmodule Exqlite.Sqlite3NIF do
   @spec enable_load_extension(db(), integer()) :: :ok | {:error, reason()}
   def enable_load_extension(_conn, _flag), do: :erlang.nif_error(:not_loaded)
 
+  @spec backup_init(exqlite3_backup_ref(), binary(), exqlite3_backup_ref() , binary()) :: {:ok,  exqlite3_backup_ref()} | {:error, reason()}
+  def backup_init(_dest, _dest_name, _src, _src_name), do: :erlang.nif_error(:not_loaded)
+
+  @spec backup_remaining(exqlite3_backup_ref()) :: backup_int_type() | {:error, reason()}
+  def backup_remaining(_backup), do: :erlang.nif_error(:not_loaded)
+
+  @spec backup_pagecount(exqlite3_backup_ref()) :: backup_int_type() | {:error, reason()}
+  def backup_pagecount(_backup), do: :erlang.nif_error(:not_loaded)
+
+
+  @spec backup_step(exqlite3_backup_ref(), backup_int_type()) :: :ok  |  :"$done" |  {:error, reason}
+  def backup_step(_backup, _n_page), do: :erlang.nif_error(:not_loaded)
+
+  @spec backup_finish(exqlite3_backup_ref()) :: :ok  |  {:error, reason}
+  def backup_finish(_backup), do: :erlang.nif_error(:not_loaded)
   # add statement inspection tooling https://sqlite.org/c3ref/expanded_sql.html
 end

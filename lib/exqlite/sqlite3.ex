@@ -16,6 +16,8 @@ defmodule Exqlite.Sqlite3 do
   alias Exqlite.Sqlite3NIF
 
   @type db() :: reference()
+  @type exqlite3_backup_ref() :: reference()
+  @type backup_int_type() :: integer()
   @type statement() :: reference()
   @type reason() :: atom() | String.t()
   @type row() :: list()
@@ -211,6 +213,52 @@ defmodule Exqlite.Sqlite3 do
       Sqlite3NIF.enable_load_extension(conn, 0)
     end
   end
+
+
+
+
+  @spec backup_init(exqlite3_backup_ref(), binary(),exqlite3_backup_ref(), binary()) :: {:ok, exqlite3_backup_ref()}| {:error, reason()}
+  def backup_init(des, des_name, src, src_name) do
+    case Sqlite3NIF.backup_init(des, des_name, src, src_name) do
+      {:ok, conn} -> {:ok, conn}
+      {:error, reason} -> IO.inspect(reason)
+    end
+  end
+
+  @spec backup_step(exqlite3_backup_ref(), backup_int_type()) :: :ok  | :"$done" |  {:error, reason}
+  def backup_step(backup, n_page) do
+    case Sqlite3NIF.backup_step(backup, n_page) do
+      :ok ->  :ok
+      :"$done" -> :"$done"
+      {:error, reason} -> IO.inspect(reason)
+    end
+  end
+
+  @spec backup_remaining(exqlite3_backup_ref()) :: backup_int_type() | {:error, reason()}
+  def backup_remaining(backup) do
+    case Sqlite3NIF.backup_remaining(backup) do
+      count ->  count
+      {:error, reason} -> IO.inspect(reason)
+    end
+  end
+
+  @spec backup_pagecount(exqlite3_backup_ref()) :: backup_int_type() | {:error, reason()}
+  def backup_pagecount(backup) do
+    case Sqlite3NIF.backup_pagecount(backup) do
+      count ->  count
+      {:error, reason} -> IO.inspect(reason)
+    end
+  end
+
+
+  @spec backup_finish(exqlite3_backup_ref()) :: :ok  | {:error, reason}
+  def backup_finish(backup) do
+    case Sqlite3NIF.backup_finish(backup) do
+      :ok ->  :ok
+      {:error, reason} -> IO.inspect(reason)
+    end
+  end
+
 
   defp convert(%Date{} = val), do: Date.to_iso8601(val)
   defp convert(%Time{} = val), do: Time.to_iso8601(val)

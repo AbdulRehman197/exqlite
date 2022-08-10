@@ -13,6 +13,7 @@
 static ErlNifResourceType* connection_type = NULL;
 static ErlNifResourceType* statement_type  = NULL;
 static sqlite3_mem_methods default_alloc_methods = {0};
+static ErlNifResourceType* backup_type = NULL;
 
 typedef struct connection
 {
@@ -23,6 +24,44 @@ typedef struct statement
 {
     sqlite3_stmt* statement;
 } statement_t;
+
+/* Data associated with an ongoing backup */
+typedef struct {
+    connection_t *source;
+    connection_t *destination;
+
+    sqlite3_backup *backup;
+} exqlite3_backup;
+
+
+
+static void
+destruct_exqlite3_backup(ErlNifEnv *env, void *arg) 
+{
+    exqlite3_backup *backup = (exqlite3_backup *) arg;
+
+    if(backup->backup) {
+        sqlite3_backup_finish(backup->backup);
+    }
+    backup->backup = NULL;
+
+    if(backup->destination) {
+        enif_release_resource(backup->destination);
+        backup->destination = NULL;
+    }
+
+    if(backup->source) {
+        enif_release_resource(backup->source);
+        backup->source = NULL;
+    }
+}
+
+
+ 
+ static ERL_NIF_TERM
+make_sqlite3_error_tuple_backup(ErlNifEnv *env, int error_code) {
+    return enif_make_tuple2(env, enif_make_atom(env, "error"), enif_make_int(env, error_code));
+}
 
 static void*
 exqlite_malloc(int bytes)
@@ -126,6 +165,17 @@ make_atom(ErlNifEnv* env, const char* atom_name)
     if (enif_make_existing_atom(env, atom_name, &atom, ERL_NIF_LATIN1)) {
         return atom;
     }
+
+    return enif_make_atom(env, atom_name);
+}
+
+static ERL_NIF_TERM
+make_atom_backup(ErlNifEnv *env, const char *atom_name)
+{
+    ERL_NIF_TERM atom;
+
+    if(enif_make_existing_atom(env, atom_name, &atom, ERL_NIF_LATIN1))
+        return atom;
 
     return enif_make_atom(env, atom_name);
 }
@@ -866,6 +916,7 @@ static int
 on_load(ErlNifEnv* env, void** priv, ERL_NIF_TERM info)
 {
     assert(env);
+ ErlNifResourceType *rt;
 
     static const sqlite3_mem_methods methods = {
       exqlite_malloc,
@@ -876,6 +927,11 @@ on_load(ErlNifEnv* env, void** priv, ERL_NIF_TERM info)
       exqlite_mem_init,
       exqlite_mem_shutdown,
       0};
+
+   rt =  enif_open_resource_type(env, "exqlite", "backup_type", destruct_exqlite3_backup,
+            ERL_NIF_RT_CREATE, NULL);
+    if(!rt) return -1;
+    backup_type = rt; 
 
     sqlite3_config(SQLITE_CONFIG_GETMALLOC, &default_alloc_methods);
     sqlite3_config(SQLITE_CONFIG_MALLOC, &methods);
@@ -944,6 +1000,188 @@ exqlite_enable_load_extension(ErlNifEnv* env, int argc, const ERL_NIF_TERM argv[
     return make_atom(env, "ok");
 }
 
+/*
+ * Backup functions
+ *
+ */
+
+static ERL_NIF_TERM
+exqlite_backup_init(ErlNifEnv *env, int argc, const ERL_NIF_TERM argv[])
+{
+    connection_t* destination = NULL;
+    ErlNifBinary destination_name;
+    connection_t* source = NULL;
+    ErlNifBinary source_name;
+    ERL_NIF_TERM eos = enif_make_int(env, 0);
+
+     
+
+    if(argc != 4) {
+        return enif_make_badarg(env);
+    }
+
+    if(!enif_get_resource(env, argv[0], connection_type, (void **) &destination)) {
+        return enif_make_badarg(env);
+        // return make_error_tuple(env, "destination is not ref");
+        
+    }
+
+    if(!enif_inspect_iolist_as_binary(env, enif_make_list2(env, argv[1], eos), &destination_name)) {
+        return enif_make_badarg(env);
+        //  return make_error_tuple(env, "destination name is not binary");
+
+    }
+
+    if(!enif_get_resource(env, argv[2], connection_type, (void **) &source)) {
+        return enif_make_badarg(env);
+        //  return make_error_tuple(env, "source is not ref");
+    }
+
+    if(!enif_inspect_iolist_as_binary(env, enif_make_list2(env, argv[3], eos), &source_name)) {
+        return enif_make_badarg(env);
+        //  return make_error_tuple(env, "source name is not binary");
+
+    }
+
+    sqlite3_backup *backup = sqlite3_backup_init(destination->db, (const char *) destination_name.data, source->db, (const char *) source_name.data);
+    if(backup == NULL) {
+        return make_sqlite3_error_tuple_backup(env, sqlite3_errcode(destination->db));
+    }
+
+    exqlite3_backup *ebackup = enif_alloc_resource(backup_type, sizeof(exqlite3_backup));
+    if(!ebackup) {
+        (void) sqlite3_backup_finish(backup);
+        return enif_raise_exception(env, make_atom_backup(env, "no_memory"));   
+    }
+
+    ebackup->backup = backup;
+
+    /**
+     * Keep references to both database connections to prevent
+     * them from being garbage collected during the operation.
+     */
+    enif_keep_resource((void *)destination);
+    ebackup->destination = destination;
+    enif_keep_resource((void *)source);
+    ebackup->source = source;
+
+    ERL_NIF_TERM erl_backup_term = enif_make_resource(env, ebackup);
+    enif_release_resource(ebackup);
+
+    return make_ok_tuple(env, erl_backup_term);
+}
+
+/*
+ * Get the remaining pagecount of the backup.
+ */
+static ERL_NIF_TERM
+exqlite_backup_remaining(ErlNifEnv *env, int argc, const ERL_NIF_TERM argv[])
+{
+    exqlite3_backup *backup;
+
+    if(argc != 1) {
+        return enif_make_badarg(env);
+    }
+
+    if(!enif_get_resource(env, argv[0], backup_type, (void **) &backup)) {
+        return enif_make_badarg(env);
+    }
+
+    sqlite3_int64 remaining = sqlite3_backup_remaining(backup->backup);
+
+    return enif_make_int64(env, remaining);
+}
+
+/*
+ * Get the total pagecount of the backup
+ */
+static ERL_NIF_TERM
+exqlite_backup_pagecount(ErlNifEnv *env, int argc, const ERL_NIF_TERM argv[])
+{
+    exqlite3_backup *backup;
+
+    if(argc != 1) {
+        return enif_make_badarg(env);
+    }
+
+    if(!enif_get_resource(env, argv[0], backup_type, (void **) &backup)) {
+        return enif_make_badarg(env);
+    }
+
+    sqlite3_int64 pagecount = sqlite3_backup_pagecount(backup->backup);
+
+    return enif_make_int64(env, pagecount);
+}
+
+static ERL_NIF_TERM
+exqlite_backup_step(ErlNifEnv *env, int argc, const ERL_NIF_TERM argv[])
+{
+    exqlite3_backup *backup;
+    int n_page;
+
+    if(argc != 2) {
+        return enif_make_badarg(env);
+    }
+
+    if(!enif_get_resource(env, argv[0], backup_type, (void **) &backup)) {
+        return enif_make_badarg(env);
+    }
+
+    if(!enif_get_int(env, argv[1], &n_page)) {
+        return enif_make_badarg(env);
+    }
+
+    int rc = sqlite3_backup_step(backup->backup, n_page);
+    if(rc == SQLITE_DONE) {
+        return make_atom_backup(env, "$done");
+    }  
+
+    if(rc != SQLITE_OK) {
+        return make_sqlite3_error_tuple_backup(env, rc);
+    }
+
+    return make_atom_backup(env, "ok");
+}
+
+/*
+ * Explicitly finish the backup.
+ */
+static ERL_NIF_TERM
+exqlite_backup_finish(ErlNifEnv *env, int argc, const ERL_NIF_TERM argv[])
+{
+    exqlite3_backup *backup;
+
+    if(argc != 1) {
+        return enif_make_badarg(env);
+    }
+
+    if(!enif_get_resource(env, argv[0], backup_type, (void **) &backup)) {
+        return enif_make_badarg(env);
+    }
+
+    int rc = SQLITE_OK;
+    if(backup->backup) {
+        rc = sqlite3_backup_finish(backup->backup);
+        backup->backup = NULL;
+    }
+
+    if(backup->source) {
+        enif_release_resource(backup->source);
+        backup->source = NULL;
+    }
+
+    if(backup->destination) {
+        enif_release_resource(backup->destination);
+        backup->destination = NULL;
+    }
+
+    if(rc != SQLITE_OK) {
+        return make_sqlite3_error_tuple_backup(env, rc);
+    }
+
+    return make_atom_backup(env, "ok");
+}
+
 //
 // Most of our nif functions are going to be IO bounded
 //
@@ -964,6 +1202,11 @@ static ErlNifFunc nif_funcs[] = {
   {"deserialize", 3, exqlite_deserialize, ERL_NIF_DIRTY_JOB_IO_BOUND},
   {"release", 2, exqlite_release, ERL_NIF_DIRTY_JOB_IO_BOUND},
   {"enable_load_extension", 2, exqlite_enable_load_extension, ERL_NIF_DIRTY_JOB_IO_BOUND},
+  {"backup_init", 4, exqlite_backup_init, ERL_NIF_DIRTY_JOB_IO_BOUND},
+  {"backup_remaining", 1, exqlite_backup_remaining},
+  {"backup_pagecount", 1, exqlite_backup_pagecount},
+  {"backup_step", 2, exqlite_backup_step, ERL_NIF_DIRTY_JOB_IO_BOUND},
+  {"backup_finish", 1, exqlite_backup_finish, ERL_NIF_DIRTY_JOB_IO_BOUND},
 };
 
 // Elixir workaround for . in module names
