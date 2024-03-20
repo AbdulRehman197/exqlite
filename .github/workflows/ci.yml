@@ -17,15 +17,15 @@ jobs:
     strategy:
       matrix:
         os: ["ubuntu-20.04"]
-        elixir: ["1.13"]
-        otp: ["24"]
+        elixir: ["1.16"]
+        otp: ["26"]
     steps:
-      - uses: actions/checkout@v2
+      - uses: actions/checkout@v3
       - uses: erlef/setup-beam@v1
         with:
           otp-version: ${{ matrix.otp }}
           elixir-version: ${{ matrix.elixir }}
-      - uses: actions/cache@v2
+      - uses: actions/cache@v3
         with:
           path: deps
           key: ${{ matrix.os }}-otp_${{ matrix.otp }}-elixir_${{ matrix.elixir }}-mix_${{ hashFiles('**/mix.lock') }}
@@ -33,6 +33,7 @@ jobs:
       - run: mix deps.get
       - run: mix deps.compile
       - run: mix format --check-formatted
+      - run: clang-format --dry-run --Werror c_src/sqlite3_nif.c
       - run: mix deps.unlock --check-unused
       - run: mix credo --all
       - run: mix test_sqlite_version
@@ -47,30 +48,21 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: ["ubuntu-20.04"]
-        elixir: ["1.13", "1.12", "1.11", "1.10"]
-        otp: ["24", "23", "22"]
-        include:
-          - os: windows-2019
-            elixir: "1.13"
-            otp: "24"
-          - os: windows-2019
-            elixir: "1.12"
-            otp: "24"
+        os: ["ubuntu-20.04", "windows-2019"]
+        elixir: ["1.16", "1.15", "1.14"]
+        otp: ["26", "25", "24"]
         exclude:
           - elixir: "1.13"
-            otp: "21"
-          - elixir: "1.12"
-            otp: "21"
+            otp: "26"
     steps:
-      - uses: actions/checkout@v2
+      - uses: actions/checkout@v3
       - uses: erlef/setup-beam@v1
         with:
           otp-version: ${{ matrix.otp }}
           elixir-version: ${{ matrix.elixir }}
       - uses: egor-tensin/vs-shell@v2
         if: runner.os == 'Windows'
-      - uses: actions/cache@v2
+      - uses: actions/cache@v3
         with:
           path: deps
           key: ${{ matrix.os }}-otp_${{ matrix.otp }}-elixir_${{ matrix.elixir }}-mix_${{ hashFiles('**/mix.lock') }}

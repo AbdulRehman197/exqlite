@@ -1,17 +1,30 @@
 defmodule Exqlite.MixProject do
   use Mix.Project
 
-  @version "0.11.3"
-  @sqlite_version "3.39.2"
+  @version "0.19.0"
+  @sqlite_version "3.44.2"
 
   def project do
     [
       app: :exqlite,
       version: @version,
-      elixir: "~> 1.10",
+      elixir: "~> 1.14",
       compilers: [:elixir_make] ++ Mix.compilers(),
       make_targets: ["all"],
       make_clean: ["clean"],
+      make_force_build: Application.get_env(:exqlite, :force_build, false),
+      make_precompiler: make_precompiler(),
+      make_precompiler_url:
+        "https://github.com/elixir-sqlite/exqlite/releases/download/v#{@version}/@{artefact_filename}",
+      make_precompiler_filename: "sqlite3_nif",
+      make_precompiler_nif_versions: [
+        versions: &nif_versions/1,
+        fallback_version: fn opts ->
+          hd(nif_versions(opts))
+        end
+      ],
+      make_env: Application.get_env(:exqlite, :make_env, %{}),
+      cc_precompiler: cc_precompiler(),
       start_permanent: Mix.env() == :prod,
       aliases: aliases(),
       deps: deps(),
@@ -43,11 +56,12 @@ defmodule Exqlite.MixProject do
     [
       {:db_connection, "~> 2.1"},
       {:ex_sqlean, "~> 0.8.5", only: [:dev, :test]},
-      {:elixir_make, "~> 0.6", runtime: false},
+      {:elixir_make, "~> 0.8", runtime: false},
+      {:cc_precompiler, "~> 0.1", runtime: false},
       {:ex_doc, "~> 0.27", only: :dev, runtime: false},
       {:temp, "~> 0.4", only: [:dev, :test]},
       {:credo, "~> 1.6", only: [:dev, :test], runtime: false},
-      {:dialyxir, "~> 1.1.0", only: [:dev, :test], runtime: false},
+      {:dialyxir, "~> 1.3.0", only: [:dev, :test], runtime: false},
       {:table, "~> 0.1.0", optional: true}
     ]
   end
@@ -62,6 +76,14 @@ defmodule Exqlite.MixProject do
     "An Elixir SQLite3 library"
   end
 
+  defp make_precompiler do
+    if System.get_env("EXQLITE_USE_SYSTEM") != nil do
+      nil
+    else
+      {:nif, CCPrecompiler}
+    end
+  end
+
   defp package do
     [
       files: ~w(
@@ -73,6 +95,7 @@ defmodule Exqlite.MixProject do
         .clang-format
         c_src
         Makefile*
+        checksum.exs
       ),
       name: "exqlite",
       licenses: ["MIT"],
@@ -110,6 +133,38 @@ defmodule Exqlite.MixProject do
     [
       plt_add_deps: :apps_direct,
       plt_add_apps: ~w(table)a
+    ]
+  end
+
+  defp nif_versions(opts) do
+    if String.contains?(opts.target, "windows") or
+         String.contains?(opts.target, "darwin") do
+      ["2.16"]
+    else
+      ["2.15"]
+    end
+  end
+
+  defp cc_precompiler do
+    [
+      cleanup: "clean",
+      compilers: %{
+        {:unix, :linux} => %{
+          :include_default_ones => true,
+          "x86_64-linux-musl" => "x86_64-linux-musl-",
+          "aarch64-linux-musl" => "aarch64-linux-musl-",
+          "riscv64-linux-musl" => "riscv64-linux-musl-",
+          "x86_64-linux-gnu" => "x86_64-linux-gnu-",
+          "aarch64-linux-gnu" => "aarch64-linux-gnu-",
+          "riscv64-linux-gnu" => "riscv64-linux-gnu-"
+        },
+        {:unix, :darwin} => %{
+          :include_default_ones => true
+        },
+        {:win32, :nt} => %{
+          :include_default_ones => true
+        }
+      }
     ]
   end
 end

@@ -37,6 +37,70 @@ defmodule Exqlite.ConnectionTest do
       File.rm(path)
     end
 
+    test "connects to a file from URL" do
+      path = Temp.path!()
+
+      {:ok, state} = Connection.connect(database: "file:#{path}?mode=rwc")
+
+      assert state.directory == Path.dirname(path)
+      assert state.db
+    end
+
+    test "fails to write a file from URL with mode=ro" do
+      path = Temp.path!()
+
+      {:ok, db} = Sqlite3.open(path)
+
+      :ok =
+        Sqlite3.execute(db, "create table test (id ingeger primary key, stuff text)")
+
+      :ok =
+        Sqlite3.execute(db, "insert into test (id, stuff) values (999, 'Some stuff')")
+
+      :ok = Sqlite3.close(db)
+
+      {:ok, conn} = Connection.connect(database: "file:#{path}?mode=ro")
+
+      assert conn.directory == Path.dirname(path)
+      assert conn.db
+
+      assert match?(
+               {:ok, _, %{rows: [[1]]}, _},
+               %Query{statement: "select count(*) from test"}
+               |> Connection.handle_execute([], [], conn)
+             )
+
+      {:error, %{message: message}, _} =
+        %Query{
+          statement: "insert into test (id, stuff) values (888, 'some more stuff')"
+        }
+        |> Connection.handle_execute([], [], conn)
+
+      # In most of the test matrix the message is "attempt to write a readonly database",
+      # but in Elixir 1.13, OTP 23, OS windows-2019 it is "not an error".
+      assert message in ["attempt to write a readonly database", "not an error"]
+
+      File.rm(path)
+    end
+
+    test "setting custom_pragmas" do
+      path = Temp.path!()
+
+      {:ok, state} =
+        Connection.connect(
+          database: path,
+          custom_pragmas: [
+            checkpoint_fullfsync: 0
+          ]
+        )
+
+      assert state.db
+
+      assert {:ok, 0} = get_pragma(state.db, :checkpoint_fullfsync)
+
+      File.rm(path)
+    end
+
     test "setting journal_size_limit" do
       path = Temp.path!()
       size_limit = 20 * 1024 * 1024
@@ -119,6 +183,23 @@ defmodule Exqlite.ConnectionTest do
       {:ok, conn} = Connection.connect(database: :memory)
 
       assert :ok == Connection.disconnect(nil, conn)
+    end
+
+    test "executes before_disconnect before disconnecting" do
+      {:ok, pid} = Agent.start_link(fn -> 0 end)
+
+      {:ok, conn} =
+        Connection.connect(
+          database: :memory,
+          before_disconnect: fn err, db ->
+            Agent.update(pid, fn count -> count + 1 end)
+            assert err == true
+            assert db
+          end
+        )
+
+      assert :ok == Connection.disconnect(true, conn)
+      assert Agent.get(pid, &Function.identity/1) == 1
     end
   end
 

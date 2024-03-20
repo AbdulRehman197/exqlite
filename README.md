@@ -6,7 +6,7 @@
 
 An Elixir SQLite3 library.
 
-If you are looking for the Ecto adapater, take a look at the
+If you are looking for the Ecto adapter, take a look at the
 [Ecto SQLite3 library][ecto_sqlite3].
 
 Documentation: https://hexdocs.pm/exqlite
@@ -27,14 +27,15 @@ Package: https://hex.pm/packages/exqlite
   second column somewhere storing the timezone name and shifting it when you
   get it from the database. This is more reliable than storing the offset as
   `+03:00` as it does not respect daylight savings time.
-
+* When storing `BLOB` values, you have to use `{:blob, the_binary}`, otherwise
+  it will be interpreted as a string. 
 
 ## Installation
 
 ```elixir
 defp deps do
   [
-    {:exqlite, "~> 0.11.3"}
+    {:exqlite, "~> 0.17"}
   ]
 end
 ```
@@ -42,15 +43,51 @@ end
 
 ## Configuration
 
+### Runtime Configuration
+
 ```elixir
 config :exqlite, default_chunk_size: 100
 ```
 
 * `default_chunk_size` - The chunk size that is used when multi-stepping when
   not specifying the chunk size explicitly.
+  
+### Compile-time Configuration
 
+In `config/config.exs`,
+
+```elixir
+config :exqlite, force_build: false
+```
+
+* `force_build` - Set `true` to opt out of using precompiled artefacts.
+  This option only affects the default configuration. For advanced configuation,
+  this library will always compile natively.
 
 ## Advanced Configuration
+
+### Defining Extra Compile Flags
+
+You can enable certain features by doing the following:
+
+```bash
+export EXQLITE_SYSTEM_CFLAGS=-DSQLITE_ENABLE_DBSTAT_VTAB=1
+```
+
+Or you can pass extra environment variables using the Elixir config:
+
+```elixir
+config :exqlite,
+  force_build: true,
+  make_env: %{
+    "EXQLITE_SYSTEM_CFLAGS" => "-DSQLITE_ENABLE_DBSTAT_VTAB=1",
+    "V" => "1"
+  }
+```
+
+### Listing Flags Used For Compilation
+
+If you `export V=1` the flags used for compilation will be output to stdout.
 
 ### Using System Installed Libraries
 
@@ -135,7 +172,9 @@ The `Exqlite.Sqlite3` module usage is fairly straight forward.
 ### Using SQLite3 native extensions
 
 Exqlite supports loading [run-time loadable SQLite3 extensions](https://www.sqlite.org/loadext.html).
-A selection of precompiled extensions for popular CPU types / architectures is available by installing the [ExSqlean](https://github.com/mindreframer/ex_sqlean) package. This package wraps [SQLean: all the missing SQLite functions](https://github.com/nalgeon/sqlean).
+A selection of precompiled extensions for popular CPU types / architectures is
+available by installing the [ExSqlean](https://github.com/mindreframer/ex_sqlean)
+package. This package wraps [SQLean: all the missing SQLite functions](https://github.com/nalgeon/sqlean).
 
 ```elixir
 alias Exqlite.Basic
@@ -157,6 +196,34 @@ Basic.load_extension(conn, ExSqlean.path_for("re"))
 Basic.close(conn)
 ```
 
+It is also possible to load extensions using the `Connection` configuration. For example:
+
+```elixir
+arch_dir =
+  System.cmd("uname", ["-sm"])
+  |> elem(0)
+  |> String.trim()
+  |> String.replace(" ", "-")
+  |> String.downcase() # => "darwin-arm64"
+
+config :myapp, arch_dir: arch_dir
+
+# global
+config :exqlite, load_extensions: [ "./priv/sqlite/\#{arch_dir}/rotate" ]
+
+# per connection in a Phoenix app
+config :myapp, Myapp.Repo,
+  database: "path/to/db",
+  load_extensions: [
+    "./priv/sqlite/\#{arch_dir}/vector0",
+    "./priv/sqlite/\#{arch_dir}/vss0"
+  ]
+```
+
+See [Exqlite.Connection.connect/1](https://hexdocs.pm/exqlite/Exqlite.Connection.html#connect/1)
+for more information. When using extensions for SQLite3, they must be compiled
+for the environment you are targeting.
+
 ## Why SQLite3
 
 I needed an Ecto3 adapter to store time series data for a personal project. I
@@ -176,6 +243,14 @@ We are using the Dirty NIF scheduler to execute the sqlite calls. The rationale
 behind this is that maintaining each sqlite's connection command pool is
 complicated and error prone.
 
+
+## Compiling NIF for Windows
+
+When compiling on Windows, you will need the [Build Tools](https://visualstudio.microsoft.com/downloads/#build-tools-for-visual-studio-2022) or equivalent toolchain. Please make sure you have the correct environment variables, including path to compiler and linker and architecture that matches `erl.exe` (likely x64).
+
+You may also need to invoke `vcvarsall.bat amd64` _before_ running `mix`.
+
+A guide is available at [guides/windows.md](./guides/windows.md)
 
 ## Contributing
 

@@ -15,7 +15,7 @@ defmodule Exqlite.Sqlite3NIF do
   @type row() :: list()
 
   def load_nif() do
-    path = :filename.join(:code.priv_dir(:exqlite), 'sqlite3_nif')
+    path = :filename.join(:code.priv_dir(:exqlite), ~c"sqlite3_nif")
     :erlang.load_nif(path, 0)
   end
 
@@ -38,7 +38,7 @@ defmodule Exqlite.Sqlite3NIF do
           :ok | {:error, reason()} | {:error, {atom(), any()}}
   def bind(_conn, _statement, _args), do: :erlang.nif_error(:not_loaded)
 
-  @spec step(db(), statement()) :: :done | :busy | {:row, [row()]} | {:error, reason()}
+  @spec step(db(), statement()) :: :done | :busy | {:row, row()} | {:error, reason()}
   def step(_conn, _statement), do: :erlang.nif_error(:not_loaded)
 
   @spec multi_step(db(), statement(), integer()) ::
@@ -65,6 +65,12 @@ defmodule Exqlite.Sqlite3NIF do
 
   @spec enable_load_extension(db(), integer()) :: :ok | {:error, reason()}
   def enable_load_extension(_conn, _flag), do: :erlang.nif_error(:not_loaded)
+
+  @spec set_update_hook(db(), pid()) :: :ok | {:error, reason()}
+  def set_update_hook(_conn, _pid), do: :erlang.nif_error(:not_loaded)
+
+  @spec set_log_hook(pid()) :: :ok | {:error, reason()}
+  def set_log_hook(_pid), do: :erlang.nif_error(:not_loaded)
 
   @spec backup_init(exqlite3_backup_ref(), binary(), exqlite3_backup_ref() , binary()) :: {:ok,  exqlite3_backup_ref()} | {:error, reason()}
   def backup_init(_dest, _dest_name, _src, _src_name), do: :erlang.nif_error(:not_loaded)

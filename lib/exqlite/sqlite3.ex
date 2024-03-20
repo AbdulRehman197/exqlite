@@ -51,25 +51,18 @@ defmodule Exqlite.Sqlite3 do
           "expected mode to be `:readwrite` or `:readonly`, but received #{inspect(mode)}"
   end
 
-  @spec close(nil) :: :ok
-  def close(nil), do: :ok
-
   @doc """
   Closes the database and releases any underlying resources.
   """
-  @spec close(db()) :: :ok | {:error, reason()}
+  @spec close(db() | nil) :: :ok | {:error, reason()}
+  def close(nil), do: :ok
   def close(conn), do: Sqlite3NIF.close(conn)
 
   @doc """
   Executes an sql script. Multiple stanzas can be passed at once.
   """
   @spec execute(db(), String.t()) :: :ok | {:error, reason()}
-  def execute(conn, sql) do
-    case Sqlite3NIF.execute(conn, sql) do
-      :ok -> :ok
-      {:error, reason} -> {:error, reason}
-    end
-  end
+  def execute(conn, sql), do: Sqlite3NIF.execute(conn, sql)
 
   @doc """
   Get the number of changes recently.
@@ -82,9 +75,7 @@ defmodule Exqlite.Sqlite3 do
   def changes(conn), do: Sqlite3NIF.changes(conn)
 
   @spec prepare(db(), String.t()) :: {:ok, statement()} | {:error, reason()}
-  def prepare(conn, sql) do
-    Sqlite3NIF.prepare(conn, sql)
-  end
+  def prepare(conn, sql), do: Sqlite3NIF.prepare(conn, sql)
 
   @spec bind(db(), statement(), nil) :: :ok | {:error, reason()}
   def bind(conn, statement, nil), do: bind(conn, statement, [])
@@ -97,7 +88,7 @@ defmodule Exqlite.Sqlite3 do
   @spec columns(db(), statement()) :: {:ok, [binary()]} | {:error, reason()}
   def columns(conn, statement), do: Sqlite3NIF.columns(conn, statement)
 
-  @spec step(db(), statement()) :: :done | :busy | {:row, [row()]} | {:error, reason()}
+  @spec step(db(), statement()) :: :done | :busy | {:row, row()} | {:error, reason()}
   def step(conn, statement), do: Sqlite3NIF.step(conn, statement)
 
   @spec multi_step(db(), statement()) ::
@@ -259,6 +250,60 @@ defmodule Exqlite.Sqlite3 do
     end
   end
 
+
+  @doc """
+  Send data change notifications to a process.
+
+  Each time an insert, update, or delete is performed on the connection provided
+  as the first argument, a message will be sent to the pid provided as the second argument.
+
+  The message is of the form: `{action, db_name, table, row_id}`, where:
+
+    * `action` is one of `:insert`, `:update` or `:delete`
+    * `db_name` is a string representing the database name where the change took place
+    * `table` is a string representing the table name where the change took place
+    * `row_id` is an integer representing the unique row id assigned by SQLite
+
+  ## Restrictions
+
+    * There are some conditions where the update hook will not be invoked by SQLite.
+      See the documentation for [more details](https://www.sqlite.org/c3ref/update_hook.html)
+    * Only one pid can listen to the changes on a given database connection at a time.
+      If this function is called multiple times for the same connection, only the last pid will
+      receive the notifications
+    * Updates only happen for the connection that is opened. For example, there
+      are two connections A and B. When an update happens on connection B, the
+      hook set for connection A will not receive the update, but the hook for
+      connection B will receive the update.
+  """
+  @spec set_update_hook(db(), pid()) :: :ok | {:error, reason()}
+  def set_update_hook(conn, pid) do
+    Sqlite3NIF.set_update_hook(conn, pid)
+  end
+
+  @doc """
+  Send log messages to a process.
+
+  Each time a message is logged in SQLite a message will be sent to the pid provided as the argument.
+
+  The message is of the form: `{:log, rc, message}`, where:
+
+    * `rc` is an integer [result code](https://www.sqlite.org/rescode.html) or an [extended result code](https://www.sqlite.org/rescode.html#extrc)
+    * `message` is a string representing the log message
+
+  See [`SQLITE_CONFIG_LOG`](https://www.sqlite.org/c3ref/c_config_covering_index_scan.html) and
+  ["The Error And Warning Log"](https://www.sqlite.org/errlog.html) for more details.
+
+  ## Restrictions
+
+    * Only one pid can listen to the log messages at a time.
+      If this function is called multiple times, only the last pid will
+      receive the notifications
+  """
+  @spec set_log_hook(pid()) :: :ok | {:error, reason()}
+  def set_log_hook(pid) do
+    Sqlite3NIF.set_log_hook(pid)
+  end
 
   defp convert(%Date{} = val), do: Date.to_iso8601(val)
   defp convert(%Time{} = val), do: Time.to_iso8601(val)
