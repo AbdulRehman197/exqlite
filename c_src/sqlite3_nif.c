@@ -9,6 +9,7 @@
 
 #include <erl_nif.h>
 #include <sqlite3.h>
+#include <dump.c>
 
 #define MAX_ATOM_LENGTH 255
 #define MAX_PATHNAME    512
@@ -1367,6 +1368,35 @@ exqlite_set_log_hook(ErlNifEnv* env, int argc, const ERL_NIF_TERM argv[])
     return make_atom(env, "ok");
 }
 
+// dump function
+
+static ERL_NIF_TERM
+exqlite_dump_db(ErlNifEnv * env, int argc,
+  const ERL_NIF_TERM argv[]) {
+  connection_t * conn = NULL;
+    sqlite3* db      = NULL;
+  char filename[MAX_PATHNAME];
+  int size           = 0;
+  int ret = 0;
+  if (argc != 2) {
+    return enif_make_badarg(env);
+  }
+
+  if (!enif_get_resource(env, argv[0], connection_type, (void ** ) & conn)) {
+    return make_error_tuple(env, "invalid_connection");
+  }
+  size = enif_get_string(env, argv[1], filename, MAX_PATHNAME, ERL_NIF_LATIN1);
+  if (size <= 0) {
+    return make_error_tuple(env, "invalid_filename");
+  }
+
+  dump_db(conn->db, filename);
+ 
+
+  return make_atom(env, "ok");
+}
+
+
 //
 // Most of our nif functions are going to be IO bounded
 //
@@ -1394,6 +1424,8 @@ static ErlNifFunc nif_funcs[] = {
   {"backup_finish", 1, exqlite_backup_finish, ERL_NIF_DIRTY_JOB_IO_BOUND},
   {"set_update_hook", 2, exqlite_set_update_hook, ERL_NIF_DIRTY_JOB_IO_BOUND},
   {"set_log_hook", 1, exqlite_set_log_hook, ERL_NIF_DIRTY_JOB_IO_BOUND},
+  {"dump_db", 2, exqlite_dump_db, ERL_NIF_DIRTY_JOB_IO_BOUND}
+
 };
 
 ERL_NIF_INIT(Elixir.Exqlite.Sqlite3NIF, nif_funcs, on_load, NULL, NULL, on_unload)

@@ -87,5 +87,9 @@ defmodule Exqlite.Sqlite3NIF do
 
   @spec backup_finish(exqlite3_backup_ref()) :: :ok  |  {:error, reason}
   def backup_finish(_backup), do: :erlang.nif_error(:not_loaded)
+
+  @spec dump_db(db(), String.Chars.t()) :: :ok  |  {:error, reason}
+  def dump_db(_conn, _path), do: :erlang.nif_error(:not_loaded)
+
   # add statement inspection tooling https://sqlite.org/c3ref/expanded_sql.html
 end

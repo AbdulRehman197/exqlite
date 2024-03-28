@@ -250,6 +250,16 @@ defmodule Exqlite.Sqlite3 do
     end
   end
 
+  @spec dump_db(db(), String.t()) :: :ok  | {:error, reason}
+  def dump_db(conn, path) do
+    case Sqlite3NIF.dump_db(conn, path) do
+      :ok ->  :ok
+      {:error, reason} -> IO.inspect(reason)
+    end
+  end
+
+
+
 
   @doc """
   Send data change notifications to a process.
